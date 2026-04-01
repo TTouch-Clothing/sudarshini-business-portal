@@ -1,0 +1,11 @@
+import { Router } from 'express';
+import { customers, logs, periodSummary, summary, vipCustomers } from '../controllers/dashboardController.js';
+import { protect } from '../middleware/auth.js';
+const router = Router();
+router.use(protect);
+router.get('/summary', summary);
+router.get('/customers', customers);
+router.get('/vip-customers', vipCustomers);
+router.get('/period/:type', periodSummary);
+router.get('/logs', logs);
+export default router;

@@ -1,0 +1,10 @@
+import { Router } from 'express';
+import { deleteOrder, getOrder, listOrders, syncOrder, updateOrder } from '../controllers/orderController.js';
+import { protect } from '../middleware/auth.js';
+const router = Router();
+router.post('/', syncOrder);
+router.get('/', protect, listOrders);
+router.get('/:id', protect, getOrder);
+router.put('/:id', protect, updateOrder);
+router.delete('/:id', protect, deleteOrder);
+export default router;
