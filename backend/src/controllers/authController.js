@@ -51,3 +51,16 @@ export async function updateProfile(req, res) {
   await logAction({ userName: user.name, action: 'Change Profile', ipAddress: req.ip });
   res.json({ message: 'Profile updated', user: { id: user._id, name: user.name, email: user.email, image: user.image, role: user.role } });
 }
+
+export async function updateProfileOne(req, res) {
+  const user = await AdminUser.findById(req.user._id);
+  if (req.body.name) user.name = req.body.name;
+  if (req.body.email) user.email = req.body.email.toLowerCase();
+  if (req.file && process.env.CLOUDINARY_CLOUD_NAME) {
+    const result = await uploadToCloudinary(req.file.buffer);
+    user.image = result.secure_url;
+  }
+  await user.save();
+  await logAction({ userName: user.name, action: 'Change Profile', ipAddress: req.ip });
+  res.json({ message: 'Profile updated', user: { id: user._id, name: user.name, email: user.email, image: user.image, role: user.role } });
+}
