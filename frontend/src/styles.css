@@ -1,13 +1,4 @@
-/* =========================
-   ROOT + GLOBAL
-   Duplicate removed:
-   - old :root removed
-   - duplicate * removed
-   - duplicate body removed
-   - duplicate a removed
-   - duplicate button,input,select removed
-   - duplicate img removed
-========================= */
+
 :root{
   --bg:#f4f6fb;
   --card:#fff;
@@ -31,7 +22,10 @@ body,
 
 body{
   margin:0;
-  font-family:Inter,system-ui,Arial;
+  /* font-family:Inter,system-ui,Arial; */
+  font-family: 'Inter', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   background:var(--bg);
   color:var(--text);
   overflow:hidden;
