@@ -90,138 +90,116 @@ function getCurrentMonthRange(baseDate = new Date()) {
   };
 }
 
-function qtyForKeyInRange(orders, key, start, end) {
-  return orders
-    .filter((order) => {
-      const orderDate = toDhakaDate(order.orderDate);
-      return orderDate >= start && orderDate <= end;
-    })
-    .reduce((sum, order) => {
-      const qty = (order.items || []).reduce((itemSum, item) => {
-        const itemKey = item.sku || item.productName;
-        if (itemKey !== key) return itemSum;
-        return itemSum + Number(item.quantity || 0);
-      }, 0);
-
-      return sum + qty;
-    }, 0);
-}
-
-function getSameWeekdayAverage(orders, key, today) {
-  const targetWeekday = today.getDay();
-  let total = 0;
-  let count = 0;
-
-  for (let i = 7; i <= 28; i += 7) {
-    const d = toDhakaDate(today);
-    d.setDate(d.getDate() - i);
-
-    if (d.getDay() !== targetWeekday) continue;
-
-    const dayStart = startOfDay(d);
-    const dayEnd = endOfDay(d);
-
-    total += qtyForKeyInRange(orders, key, dayStart, dayEnd);
-    count += 1;
-  }
-
-  return count ? total / count : 0;
-}
-
 export async function forecast(req, res) {
   try {
-    const allOrders = await Order.find().sort({ orderDate: 1 });
-
-    const skuMap = new Map();
-
-    for (const order of allOrders) {
-      for (const item of order.items || []) {
-        const key = item.sku || item.productName;
-        if (!key) continue;
-
-        if (!skuMap.has(key)) {
-          skuMap.set(key, {
-            key,
-            sku: item.sku || '',
-            productName: item.productName || 'Unknown Product',
-            imageUrl: item.imageUrl || '',
-          });
-        }
-      }
-    }
+    const allOrders = await Order.find({}, { orderDate: 1, items: 1 }).lean();
 
     const today = toDhakaDate();
-    const todayStart = startOfDay(today);
+    const todayEnd = endOfDay(today);
 
     const fiveDayRange = getCurrentFiveDayBlockRange(today);
     const monthRange = getCurrentMonthRange(today);
 
-    const rows = [...skuMap.values()]
-      .map((row) => {
-        const actualFiveDay = qtyForKeyInRange(
-          allOrders,
-          row.key,
-          fiveDayRange.start,
-          fiveDayRange.end
+    const last7Start = startOfDay(
+      new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6)
+    );
+
+    const last30Start = startOfDay(
+      new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29)
+    );
+
+    const skuStats = new Map();
+
+    for (const order of allOrders) {
+      const orderDate = toDhakaDate(order.orderDate);
+
+      for (const item of order.items || []) {
+        const key = item.sku || item.productName;
+        if (!key) continue;
+
+        if (!skuStats.has(key)) {
+          skuStats.set(key, {
+            key,
+            sku: item.sku || '',
+            productName: item.productName || 'Unknown Product',
+            imageUrl: item.imageUrl || item.image || '',
+            fiveDayActual: 0,
+            monthActual: 0,
+            last7Qty: 0,
+            last30Qty: 0,
+          });
+        }
+
+        const stat = skuStats.get(key);
+        const qty = Number(item.quantity || 0);
+
+        if (orderDate >= fiveDayRange.start && orderDate <= fiveDayRange.end) {
+          stat.fiveDayActual += qty;
+        }
+
+        if (orderDate >= monthRange.start && orderDate <= monthRange.end) {
+          stat.monthActual += qty;
+        }
+
+        if (orderDate >= last7Start && orderDate <= todayEnd) {
+          stat.last7Qty += qty;
+        }
+
+        if (orderDate >= last30Start && orderDate <= todayEnd) {
+          stat.last30Qty += qty;
+        }
+      }
+    }
+
+    const rows = Array.from(skuStats.values())
+      .map((stat) => {
+        const recent7 = stat.last7Qty / 7;
+        const recent30 = stat.last30Qty / 30;
+
+        const predictedDaily = recent7 * 0.6 + recent30 * 0.4;
+
+        const expectedFiveDay = Math.round(
+          predictedDaily * fiveDayRange.totalDays
         );
-
-        const actualMonth = qtyForKeyInRange(
-          allOrders,
-          row.key,
-          monthRange.start,
-          monthRange.end
+        const expectedMonth = Math.round(
+          predictedDaily * monthRange.totalDays
         );
-
-        const last7Start = startOfDay(
-          new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6)
-        );
-
-        const last30Start = startOfDay(
-          new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29)
-        );
-
-        const actual7 = qtyForKeyInRange(allOrders, row.key, last7Start, endOfDay(today));
-        const actual30 = qtyForKeyInRange(allOrders, row.key, last30Start, endOfDay(today));
-
-        const recent7 = actual7 / 7;
-        const recent30 = actual30 / 30;
-        const weekdayAvg = getSameWeekdayAverage(allOrders, row.key, todayStart) || recent7;
-
-        const predictedDaily = recent7 * 0.5 + recent30 * 0.3 + weekdayAvg * 0.2;
-
-        const expectedFiveDay = Math.round(predictedDaily * fiveDayRange.totalDays);
-        const expectedMonth = Math.round(predictedDaily * monthRange.totalDays);
 
         return {
-          sku: row.sku,
-          productName: row.productName,
-          imageUrl: row.imageUrl,
+          sku: stat.sku,
+          productName: stat.productName,
+          imageUrl: stat.imageUrl,
+          image: stat.imageUrl,
 
           fiveDay: {
             rangeLabel: fiveDayRange.label,
             expected: expectedFiveDay,
-            actual: actualFiveDay,
+            actual: stat.fiveDayActual,
           },
 
           month: {
             rangeLabel: monthRange.label,
             expected: expectedMonth,
-            actual: actualMonth,
+            actual: stat.monthActual,
           },
 
           status:
-            expectedMonth >= 100 ? 'Fast' : expectedMonth >= 40 ? 'Normal' : 'Slow',
+            expectedMonth >= 100
+              ? 'Fast'
+              : expectedMonth >= 40
+              ? 'Normal'
+              : 'Slow',
         };
       })
       .sort((a, b) => b.month.expected - a.month.expected);
 
-    res.json({
+    return res.json({
       items: rows.slice(0, 10),
       allItems: rows,
     });
   } catch (error) {
     console.error('Forecast error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       message: 'Failed to generate forecast',
     });
   }
