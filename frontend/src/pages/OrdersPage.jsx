@@ -30,9 +30,7 @@ export default function OrdersPage() {
 
   async function load(keyword = "") {
     const { data } = await http.get("/orders");
-    const q = String(keyword || "")
-      .trim()
-      .toLowerCase();
+    const q = String(keyword || "").trim().toLowerCase();
 
     if (!q) {
       setRows(data);
@@ -41,9 +39,7 @@ export default function OrdersPage() {
     }
 
     const filtered = data.filter((order) =>
-      String(order.orderId || "")
-        .toLowerCase()
-        .includes(q),
+      String(order.orderId || "").toLowerCase().includes(q),
     );
 
     setRows(filtered);
@@ -94,17 +90,28 @@ export default function OrdersPage() {
     load(search);
   }
 
-  function getUniqueItems(items = []) {
+  function groupItems(items = []) {
     const map = new Map();
 
     for (const item of items) {
-      const key = item.sku || item.productName || item.imageUrl;
+      const key =
+        item.sku?.trim() ||
+        item.productName?.trim() ||
+        item.imageUrl ||
+        "unknown";
+
       if (!map.has(key)) {
-        map.set(key, item);
+        map.set(key, {
+          ...item,
+          quantity: Number(item.quantity || 0),
+        });
+      } else {
+        const existing = map.get(key);
+        existing.quantity += Number(item.quantity || 0);
       }
     }
 
-    return [...map.values()];
+    return Array.from(map.values());
   }
 
   function formatDateTime(value) {
@@ -187,8 +194,9 @@ export default function OrdersPage() {
 
           <tbody>
             {paginatedRows.map((o) => {
-              const uniqueItems = getUniqueItems(o.items || []);
-              const skuText = uniqueItems
+              const groupedItems = groupItems(o.items || []);
+
+              const skuText = groupedItems
                 .map((item) => item.sku)
                 .filter(Boolean)
                 .join(", ");
@@ -207,27 +215,50 @@ export default function OrdersPage() {
                     <div
                       style={{
                         display: "flex",
-                        gap: 6,
+                        gap: 8,
                         flexWrap: "wrap",
                       }}
                     >
-                      {uniqueItems.map((item, index) =>
+                      {groupedItems.map((item, index) =>
                         item.imageUrl ? (
-                          <img
+                          <div
                             key={`${o._id}-${item.sku || index}`}
-                            src={item.imageUrl}
-                            alt={item.productName || "product"}
-                            title={item.productName || ""}
-                            onClick={() => setPreviewImage(item.imageUrl)}
                             style={{
-                              width: 45,
-                              height: 45,
-                              objectFit: "cover",
-                              borderRadius: 8,
-                              border: "1px solid #e5e7eb",
-                              cursor: "pointer",
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "center",
+                              gap: 4,
                             }}
-                          />
+                          >
+                            <img
+                              src={item.imageUrl}
+                              alt={item.productName || "product"}
+                              title={item.productName || ""}
+                              onClick={() => setPreviewImage(item.imageUrl)}
+                              style={{
+                                width: 45,
+                                height: 45,
+                                objectFit: "cover",
+                                borderRadius: 8,
+                                border: "1px solid #e5e7eb",
+                                cursor: "pointer",
+                                display: "block",
+                              }}
+                            />
+
+                            {item.quantity > 1 && (
+                              <span
+                                style={{
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  color: "#111827",
+                                  lineHeight: 1,
+                                }}
+                              >
+                                ({item.quantity})
+                              </span>
+                            )}
+                          </div>
                         ) : null,
                       )}
                     </div>
