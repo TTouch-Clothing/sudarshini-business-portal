@@ -70,30 +70,9 @@ function normalizeImageUrl(url = "") {
 
 function buildSearchableContent(order) {
   const orderId = cleanText(order.orderId || "-");
-  const phone = cleanText(order.phone || "-");
-  const customer = cleanText(order.customerName || "-");
-
-  const skuText = Array.isArray(order.items)
-    ? order.items
-        .map((item) => cleanText(item?.sku || ""))
-        .filter(Boolean)
-        .join(", ")
-    : "-";
-
-  const productText = Array.isArray(order.items)
-    ? order.items
-        .map((item) => cleanText(item?.productName || ""))
-        .filter(Boolean)
-        .join(", ")
-    : "-";
-
   return [
     `Order: ${orderId}`,
-    `Customer: ${customer}`,
-    `Phone: ${phone}`,
-    `SKU: ${skuText}`,
-    `Products: ${productText}`,
-  ].join(" | ");
+  ]
 }
 
 function buildMainOrderEmbed(order) {
