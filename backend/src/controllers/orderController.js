@@ -3,6 +3,7 @@ import Customer from "../models/Customer.js";
 import { normalizePhone } from "../utils/normalizePhone.js";
 import { sumItemQty } from "../utils/calc.js";
 import { logAction } from "../utils/logAction.js";
+import { sendDiscordOrderWebhook } from "../utils/sendDiscordOrderWebhook.js";
 
 function parseOrderDateText(orderDateText) {
   if (!orderDateText) return null;
@@ -43,7 +44,6 @@ function parseOrderDateText(orderDateText) {
   if (ampm === "PM" && hour !== 12) hour += 12;
   if (ampm === "AM" && hour === 12) hour = 0;
 
-  // orderDateText is Bangladesh time, so convert Asia/Dhaka local time to UTC
   const utcMs = Date.UTC(year, month, day, hour - 6, minute, 0, 0);
   const date = new Date(utcMs);
 
@@ -87,43 +87,55 @@ async function syncCustomerFromOrder(order) {
 }
 
 export async function syncOrder(req, res) {
-  if (req.headers["x-sync-secret"] !== process.env.SYNC_SECRET) {
-    return res.status(401).json({ message: "Invalid sync secret" });
-  }
-
-  const payload = { ...req.body };
-  payload.normalizedPhone = normalizePhone(payload.phone);
-
-  // Main rule:
-  // orderDateText is the source of truth
-  // orderDate is derived from it for all calculations
-  const parsedFromText = parseOrderDateText(payload.orderDateText);
-
-  if (parsedFromText) {
-    payload.orderDate = parsedFromText;
-  } else if (payload.orderDate) {
-    const parsedDate = new Date(payload.orderDate);
-    payload.orderDate = Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
-  } else {
-    payload.orderDate = new Date();
-  }
-
-  const order = await Order.findOneAndUpdate(
-    { orderId: payload.orderId },
-    payload,
-    {
-      upsert: true,
-      new: true,
-      setDefaultsOnInsert: true
+  try {
+    if (req.headers["x-sync-secret"] !== process.env.SYNC_SECRET) {
+      return res.status(401).json({ message: "Invalid sync secret" });
     }
-  );
 
-  await syncCustomerFromOrder(order);
+    const payload = { ...req.body };
+    payload.normalizedPhone = normalizePhone(payload.phone);
 
-  res.status(201).json({
-    message: "Order synced",
-    orderId: order.orderId
-  });
+    const parsedFromText = parseOrderDateText(payload.orderDateText);
+
+    if (parsedFromText) {
+      payload.orderDate = parsedFromText;
+    } else if (payload.orderDate) {
+      const parsedDate = new Date(payload.orderDate);
+      payload.orderDate = Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+    } else {
+      payload.orderDate = new Date();
+    }
+
+    const existingOrder = await Order.findOne({ orderId: payload.orderId });
+
+    const order = await Order.findOneAndUpdate(
+      { orderId: payload.orderId },
+      payload,
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
+
+    await syncCustomerFromOrder(order);
+
+    if (!existingOrder) {
+      try {
+        await sendDiscordOrderWebhook(order);
+      } catch (discordError) {
+        console.error("Discord webhook error:", discordError.message);
+      }
+    }
+
+    return res.status(201).json({
+      message: "Order synced",
+      orderId: order.orderId
+    });
+  } catch (error) {
+    console.error("syncOrder error:", error);
+    return res.status(500).json({ message: "Failed to sync order" });
+  }
 }
 
 export async function listOrders(req, res) {
@@ -138,7 +150,7 @@ export async function listOrders(req, res) {
         ]
       }
     : {};
-  // const orders = await Order.find(filter).sort({ orderDate: -1 });
+
   const orders = await Order.find(filter);
 
   orders.sort((a, b) => {
