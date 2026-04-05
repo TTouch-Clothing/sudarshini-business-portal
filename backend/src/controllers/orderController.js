@@ -29,7 +29,7 @@ function parseOrderDateText(orderDateText) {
     sep: 8,
     oct: 9,
     nov: 10,
-    dec: 11
+    dec: 11,
   };
 
   const month = months[monthStr.toLowerCase()];
@@ -67,7 +67,7 @@ async function syncCustomerFromOrder(order) {
       totalQuantity: qty,
       totalAmount: order.total || 0,
       firstOrderDate: order.orderDate,
-      lastOrderDate: order.orderDate
+      lastOrderDate: order.orderDate,
     });
     return;
   }
@@ -114,7 +114,7 @@ export async function syncOrder(req, res) {
       {
         upsert: true,
         new: true,
-        setDefaultsOnInsert: true
+        setDefaultsOnInsert: true,
       }
     );
 
@@ -122,7 +122,18 @@ export async function syncOrder(req, res) {
 
     if (!existingOrder) {
       try {
-        await sendDiscordOrderWebhook(order);
+        // Save first -> read final DB data -> send to Discord
+        const savedOrder = await Order.findById(order._id).lean();
+
+        console.log(
+          "DISCORD IMAGE CHECK:",
+          savedOrder?.items?.map((item) => ({
+            sku: item.sku,
+            imageUrl: item.imageUrl,
+          }))
+        );
+
+        await sendDiscordOrderWebhook(savedOrder);
       } catch (discordError) {
         console.error("Discord webhook error:", discordError.message);
       }
@@ -130,7 +141,7 @@ export async function syncOrder(req, res) {
 
     return res.status(201).json({
       message: "Order synced",
-      orderId: order.orderId
+      orderId: order.orderId,
     });
   } catch (error) {
     console.error("syncOrder error:", error);
@@ -146,8 +157,8 @@ export async function listOrders(req, res) {
         $or: [
           { orderId: new RegExp(search, "i") },
           { customerName: new RegExp(search, "i") },
-          { phone: new RegExp(search, "i") }
-        ]
+          { phone: new RegExp(search, "i") },
+        ],
       }
     : {};
 
@@ -192,7 +203,7 @@ export async function updateOrder(req, res) {
   await logAction({
     userName: req.user.name,
     action: `Edit Order ${order.orderId}`,
-    ipAddress: req.ip
+    ipAddress: req.ip,
   });
 
   res.json(order);
@@ -229,7 +240,7 @@ export async function deleteOrder(req, res) {
   await logAction({
     userName: req.user.name,
     action: `Delete Order ${order.orderId}`,
-    ipAddress: req.ip
+    ipAddress: req.ip,
   });
 
   res.json({ message: "Order deleted" });

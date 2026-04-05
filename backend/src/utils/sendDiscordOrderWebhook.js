@@ -54,6 +54,20 @@ function truncate(text = "", max = 1024) {
   return `${str.slice(0, max - 3)}...`;
 }
 
+function isValidImageUrl(url = "") {
+  return /^https?:\/\/.+/i.test(cleanText(url));
+}
+
+function normalizeImageUrl(url = "") {
+  const cleaned = cleanText(url);
+  if (!cleaned) return "";
+  try {
+    return encodeURI(cleaned);
+  } catch {
+    return cleaned;
+  }
+}
+
 function buildSearchableContent(order) {
   const orderId = cleanText(order.orderId || "-");
   const phone = cleanText(order.phone || "-");
@@ -177,7 +191,7 @@ function buildItemEmbed(item) {
   const productName = cleanText(item.productName || "Product");
   const sku = cleanText(item.sku || "-");
   const quantity = Number(item.quantity || 0);
-  const imageUrl = cleanText(item.imageUrl || "");
+  const imageUrl = normalizeImageUrl(item.imageUrl || "");
 
   return {
     title: productName,
@@ -194,7 +208,7 @@ function buildItemEmbed(item) {
         inline: true,
       },
     ],
-    image: imageUrl ? { url: imageUrl } : undefined,
+    image: isValidImageUrl(imageUrl) ? { url: imageUrl } : undefined,
   };
 }
 
