@@ -8,14 +8,57 @@ export default function PredictionPage() {
   const [showAll, setShowAll] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
   const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    http.get("/prediction").then((r) => setData(r.data));
+    let isMounted = true;
+
+    const fetchPrediction = async () => {
+      try {
+        setLoading(true);
+        setError("");
+
+        const res = await http.get("/prediction");
+
+        if (isMounted) {
+          setData(res.data);
+        }
+      } catch (err) {
+        console.error("Prediction error:", err);
+
+        let message = "Failed to load prediction";
+
+        if (err.code === "ECONNABORTED") {
+          message = "Prediction request timed out. Please try again.";
+        } else if (err.response?.data?.message) {
+          message = err.response.data.message;
+        } else if (err.message) {
+          message = err.message;
+        }
+
+        if (isMounted) {
+          setError(message);
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchPrediction();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
     function handleEsc(e) {
-      if (e.key === "Escape") setPreviewImage(null);
+      if (e.key === "Escape") {
+        setPreviewImage(null);
+      }
     }
 
     if (previewImage) {
@@ -27,7 +70,7 @@ export default function PredictionPage() {
 
   const baseRows = useMemo(() => {
     if (!data) return [];
-    return showAll ? data.allItems : data.items;
+    return showAll ? data.allItems || [] : data.items || [];
   }, [data, showAll]);
 
   const rows = useMemo(() => {
@@ -41,7 +84,26 @@ export default function PredictionPage() {
     });
   }, [baseRows, search]);
 
-  if (!data) return <LoadingBlock lines={7} />;
+  if (loading) {
+    return <LoadingBlock lines={7} />;
+  }
+
+  if (error) {
+    return (
+      <Card title="SKU Demand Forecast">
+        <div
+          style={{
+            padding: "24px",
+            textAlign: "center",
+            color: "#dc2626",
+            fontWeight: 500,
+          }}
+        >
+          {error}
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <>
@@ -53,7 +115,7 @@ export default function PredictionPage() {
               <Search size={16} className="prediction-search-icon" />
               <input
                 type="text"
-                placeholder="Search by SKU code"
+                placeholder="Search by SKU code or product name"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="prediction-search-input"
@@ -125,7 +187,7 @@ export default function PredictionPage() {
                         {imageSrc ? (
                           <img
                             src={imageSrc}
-                            alt={r.productName}
+                            alt={r.productName || "Product"}
                             className="prediction-thumb"
                             onClick={() => setPreviewImage(imageSrc)}
                           />
@@ -176,7 +238,11 @@ export default function PredictionPage() {
                 })
               ) : (
                 <tr>
-                  <td colSpan={10} className="text-center muted" style={{ padding: 24 }}>
+                  <td
+                    colSpan={10}
+                    className="text-center muted"
+                    style={{ padding: 24 }}
+                  >
                     No SKU found
                   </td>
                 </tr>
@@ -196,6 +262,7 @@ export default function PredictionPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <button
+              type="button"
               className="image-modal-close"
               onClick={() => setPreviewImage(null)}
             >
