@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
+import Cropper from 'react-easy-crop';
 import {
   Trash2,
   Eye,
@@ -30,6 +31,48 @@ const initialEditForm = {
   image: null
 };
 
+function createImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.addEventListener('load', () => resolve(image));
+    image.addEventListener('error', (error) => reject(error));
+    image.setAttribute('crossOrigin', 'anonymous');
+    image.src = url;
+  });
+}
+
+async function getCroppedImg(imageSrc, pixelCrop, fileName = 'cropped-image.jpg') {
+  const image = await createImage(imageSrc);
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  canvas.width = pixelCrop.width;
+  canvas.height = pixelCrop.height;
+
+  ctx.drawImage(
+    image,
+    pixelCrop.x,
+    pixelCrop.y,
+    pixelCrop.width,
+    pixelCrop.height,
+    0,
+    0,
+    pixelCrop.width,
+    pixelCrop.height
+  );
+
+  return new Promise((resolve) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        resolve(new File([blob], fileName, { type: 'image/jpeg' }));
+      },
+      'image/jpeg',
+      0.95
+    );
+  });
+}
+
 export default function AdminUsersPage() {
   const [rows, setRows] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -46,9 +89,17 @@ export default function AdminUsersPage() {
   const [form, setForm] = useState(initialForm);
   const [editForm, setEditForm] = useState(initialEditForm);
   const [editImagePreview, setEditImagePreview] = useState('');
+  const [editExistingImageRemoved, setEditExistingImageRemoved] = useState(false);
 
   const [page, setPage] = useState(1);
   const pageSize = 10;
+
+  const [cropModalOpen, setCropModalOpen] = useState(false);
+  const [cropSource, setCropSource] = useState('');
+  const [cropMode, setCropMode] = useState('create');
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
 
   const load = async () => {
     try {
@@ -78,7 +129,13 @@ export default function AdminUsersPage() {
 
   useEffect(() => {
     if (!editForm.image) {
-      if (!editUser?.image) setEditImagePreview('');
+      if (editExistingImageRemoved) {
+        setEditImagePreview('');
+      } else if (editUser?.image) {
+        setEditImagePreview(editUser.image);
+      } else {
+        setEditImagePreview('');
+      }
       return;
     }
 
@@ -86,7 +143,7 @@ export default function AdminUsersPage() {
     setEditImagePreview(url);
 
     return () => URL.revokeObjectURL(url);
-  }, [editForm.image, editUser]);
+  }, [editForm.image, editUser, editExistingImageRemoved]);
 
   useEffect(() => {
     setPage(1);
@@ -117,6 +174,51 @@ export default function AdminUsersPage() {
     return filteredRows.slice(start, start + pageSize);
   }, [filteredRows, page]);
 
+  function onCropComplete(_, croppedPixels) {
+    setCroppedAreaPixels(croppedPixels);
+  }
+
+  function openCropModal(file, mode) {
+    if (!file) return;
+    const objectUrl = URL.createObjectURL(file);
+    setCropSource(objectUrl);
+    setCropMode(mode);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    setCropModalOpen(true);
+  }
+
+  async function handleCropSave() {
+    try {
+      if (!cropSource || !croppedAreaPixels) return;
+
+      const croppedFile = await getCroppedImg(
+        cropSource,
+        croppedAreaPixels,
+        `${cropMode}-${Date.now()}.jpg`
+      );
+
+      if (cropMode === 'create') {
+        setForm((prev) => ({ ...prev, image: croppedFile }));
+      } else {
+        setEditForm((prev) => ({ ...prev, image: croppedFile }));
+        setEditExistingImageRemoved(false);
+      }
+
+      setCropModalOpen(false);
+      URL.revokeObjectURL(cropSource);
+      setCropSource('');
+    } catch {
+      toast.error('Failed to crop image');
+    }
+  }
+
+  function handleCropCancel() {
+    if (cropSource) URL.revokeObjectURL(cropSource);
+    setCropModalOpen(false);
+    setCropSource('');
+  }
+
   function closeCreateModal() {
     setShowCreateForm(false);
     setForm(initialForm);
@@ -128,6 +230,7 @@ export default function AdminUsersPage() {
     setEditUser(null);
     setEditForm(initialEditForm);
     setEditImagePreview('');
+    setEditExistingImageRemoved(false);
   }
 
   async function add(e) {
@@ -177,6 +280,7 @@ export default function AdminUsersPage() {
       image: null
     });
     setEditImagePreview(user.image || '');
+    setEditExistingImageRemoved(false);
   }
 
   async function updateUser(e) {
@@ -196,7 +300,12 @@ export default function AdminUsersPage() {
       fd.append('name', editForm.name);
       fd.append('email', editForm.email);
       fd.append('role', editForm.role);
-      if (editForm.image) fd.append('image', editForm.image);
+
+      if (editForm.image) {
+        fd.append('image', editForm.image);
+      } else if (editExistingImageRemoved) {
+        fd.append('removeImage', 'true');
+      }
 
       await http.put(`/admins/${editUser._id}`, fd, {
         headers: { 'Content-Type': 'multipart/form-data' }
@@ -480,20 +589,30 @@ export default function AdminUsersPage() {
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) =>
-                      setForm({ ...form, image: e.target.files?.[0] || null })
-                    }
+                    onChange={(e) => openCropModal(e.target.files?.[0] || null, 'create')}
                   />
                 </div>
               </div>
 
               {imagePreview && (
-                <div className="admin-user-image-preview-wrap">
+                <div className="image-preview-top-wrap">
                   <img
                     src={imagePreview}
                     alt="Preview"
                     className="admin-user-image-preview"
                   />
+
+                  <button
+                    type="button"
+                    className="image-top-remove-btn"
+                    onClick={() => {
+                      setForm((prev) => ({ ...prev, image: null }));
+                      setImagePreview('');
+                    }}
+                    title="Remove image"
+                  >
+                    <X size={14} />
+                  </button>
                 </div>
               )}
 
@@ -594,23 +713,31 @@ export default function AdminUsersPage() {
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) =>
-                      setEditForm({
-                        ...editForm,
-                        image: e.target.files?.[0] || null
-                      })
-                    }
+                    onChange={(e) => openCropModal(e.target.files?.[0] || null, 'edit')}
                   />
                 </div>
               </div>
 
               {editImagePreview && (
-                <div className="admin-user-image-preview-wrap">
+                <div className="image-preview-top-wrap">
                   <img
                     src={editImagePreview}
                     alt="Edit preview"
                     className="admin-user-image-preview"
                   />
+
+                  <button
+                    type="button"
+                    className="image-top-remove-btn"
+                    onClick={() => {
+                      setEditForm((prev) => ({ ...prev, image: null }));
+                      setEditImagePreview('');
+                      setEditExistingImageRemoved(true);
+                    }}
+                    title="Remove image"
+                  >
+                    <X size={14} />
+                  </button>
                 </div>
               )}
 
@@ -644,6 +771,63 @@ export default function AdminUsersPage() {
                 disabled={loading}
               >
                 {loading ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {cropModalOpen && (
+        <div className="admin-modal-overlay">
+          <div className="crop-modal-box">
+            <button
+              type="button"
+              className="admin-modal-close"
+              onClick={handleCropCancel}
+            >
+              <X size={18} />
+            </button>
+
+            <h3 className="admin-modal-title">Crop Image</h3>
+
+            <div className="cropper-wrap">
+              <Cropper
+                image={cropSource}
+                crop={crop}
+                zoom={zoom}
+                aspect={1}
+                onCropChange={setCrop}
+                onZoomChange={setZoom}
+                onCropComplete={onCropComplete}
+              />
+            </div>
+
+            <div className="crop-controls">
+              <label>Zoom</label>
+              <input
+                type="range"
+                min={1}
+                max={3}
+                step={0.1}
+                value={zoom}
+                onChange={(e) => setZoom(Number(e.target.value))}
+              />
+            </div>
+
+            <div className="crop-actions">
+              <button
+                type="button"
+                className="admin-user-cancel-btn"
+                onClick={handleCropCancel}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={handleCropSave}
+              >
+                Crop & Use
               </button>
             </div>
           </div>
